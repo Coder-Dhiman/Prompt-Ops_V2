@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prompt-ops"
+version = "0.1.0"
+description = "Lightweight LLM middleware for automatic prompt optimization"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "httpx>=0.27.0",
+    "tenacity>=8.2.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.35.0",
+    "plotly>=5.20.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.9.0",
+]
+
+[project.scripts]
+prompt-ops = "prompt_ops.__main__:main"
