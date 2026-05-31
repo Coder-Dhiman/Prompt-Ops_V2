@@ -1,5 +1,8 @@
 import time
 import inspect
+import random
+from prompt_ops.client import llm_client, LLMResponse
+from prompt_ops.config import settings
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor
 from prompt_ops.optimizer import prompt_manager
@@ -52,7 +55,7 @@ class Orchestrator:
                     bound_args.arguments["temperature"] = best_temp
             
             # Start tracking
-            requested_model = bound_args.arguments.get("model", "meta-llama/llama-3.3-8b-instruct:free")
+            requested_model = bound_args.arguments.get("model", "google/gemini-2.0-flash-001")
             used_model = requested_model
 
             start_time = time.monotonic()
@@ -69,16 +72,40 @@ class Orchestrator:
 
             latency_ms = (time.monotonic() - start_time) * 1000
 
+            # Extract real telemetry data if the response is from our LLMClient
+            tokens_in = 0
+            tokens_out = 0
+            cost = 0.0
+            success = True
+            error_msg = None
+            
+            if isinstance(response, LLMResponse):
+                tokens_in = response.input_tokens
+                tokens_out = response.output_tokens
+                cost = response.cost_usd
+                success = response.success
+                error_msg = response.error
+
             # Async Eval + log
             log_id = telemetry_tracker.log_request(
                 prompt_id=prompt_id,
                 version=version_name,
                 model=used_model,
                 latency_ms=latency_ms,
-                tokens_in=0,  # placeholder
-                tokens_out=0, # placeholder
-                cost=0.0,     # placeholder
-                success=True
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost=cost,
+                success=success,
+                error=error_msg
+            )
+            
+            # Update aggregated model metrics
+            telemetry_tracker.update_model_metrics(
+                model=used_model,
+                latency_ms=latency_ms,
+                quality=None,  # Will be updated by evaluator if it runs
+                cost=cost,
+                success=success
             )
 
             # Do not block main thread
@@ -93,31 +120,34 @@ class Orchestrator:
 
             def background_eval():
                 try:
-                    eval_res = evaluator.evaluate(prompt_str, str(response), prompt_id, version_name or "default")
-                    if eval_res:
-                        result_obj.quality_score = eval_res.composite
-                        telemetry_tracker.update_quality(log_id, eval_res.composite)
-                        
-                        if version_name:
-                            with get_session() as session:
-                                from prompt_ops.database.models import PromptVersion
-                                version = session.query(PromptVersion).filter_by(prompt_id=prompt_id, version_name=version_name).first()
-                                if version:
-                                    prompt_manager.update_metrics(version.id, eval_res.composite)
-                                    
-                        with get_session() as session:
-                            db_eval = DbEvaluationResult(
-                                telemetry_log_id=log_id,
-                                relevance=eval_res.relevance,
-                                accuracy=eval_res.accuracy,
-                                completeness=eval_res.completeness,
-                                format_compliance=eval_res.format_compliance,
-                                safety=eval_res.safety,
-                                composite=eval_res.composite,
-                                timestamp=eval_res.timestamp
-                            )
-                            session.add(db_eval)
-                            session.commit()
+                    if settings.auto_evaluate and success:
+                        if random.random() <= settings.evaluation_sample_rate:
+                            response_text = response.content if isinstance(response, LLMResponse) else str(response)
+                            eval_res = evaluator.evaluate(prompt_str, response_text, prompt_id, version_name or "default")
+                            if eval_res:
+                                result_obj.quality_score = eval_res.composite
+                                telemetry_tracker.update_quality(log_id, eval_res.composite)
+                                
+                                if version_name:
+                                    with get_session() as session:
+                                        from prompt_ops.database.models import PromptVersion
+                                        version = session.query(PromptVersion).filter_by(prompt_id=prompt_id, version_name=version_name).first()
+                                        if version:
+                                            prompt_manager.update_metrics(version.id, eval_res.composite)
+                                            
+                                with get_session() as session:
+                                    db_eval = DbEvaluationResult(
+                                        telemetry_log_id=log_id,
+                                        relevance=eval_res.relevance,
+                                        accuracy=eval_res.accuracy,
+                                        completeness=eval_res.completeness,
+                                        format_compliance=eval_res.format_compliance,
+                                        safety=eval_res.safety,
+                                        composite=eval_res.composite,
+                                        timestamp=eval_res.timestamp
+                                    )
+                                    session.add(db_eval)
+                                    session.commit()
 
                 except Exception as e:
                     logger.error(f"Error in background eval: {e}")

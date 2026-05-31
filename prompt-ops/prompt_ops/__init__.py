@@ -1,17 +1,25 @@
-from prompt_ops.decorator import optimize, OptimizeResult
-from prompt_ops.optimizer import prompt_manager
-from prompt_ops.temperature import temperature_optimizer
-from prompt_ops.database.connection import init_database
+"""
+Prompt-Ops V2: A lightweight, decorator-based SDK for LLM prompt optimization,
+cost routing, and telemetry.
+"""
 
-# auto-init on import
-init_database()
+from .decorator import optimize
+from .config import settings
+from .database.connection import init_database, get_session as get_db
+from .client import llm_client, LLMClient, LLMResponse
+from .monitor import monitor
+
+__version__ = "2.0.0"
 
 __all__ = [
     "optimize",
-    "OptimizeResult", 
-    "prompt_manager",
-    "temperature_optimizer",
+    "settings",
     "init_database",
+    "get_db",
+    "llm_client",
+    "LLMClient",
+    "LLMResponse"
 ]
 
-__version__ = "0.1.0"
+# Start the background monitoring daemon automatically when the package is imported
+monitor.start()
